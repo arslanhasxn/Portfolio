@@ -1,0 +1,244 @@
+.card-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: rgba(0, 0, 0, 0.72);
+  cursor: default;
+}
+
+.card-label-wrap {
+  position: absolute;
+  left: var(--pad);
+  right: var(--pad);
+  /* Fixed above the default peek strip — does not follow hover/focus */
+  bottom: calc(28px + var(--text-leading) + 0.5rem);
+  z-index: 32;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.card-label {
+  margin: 0;
+  font-family: var(--font);
+  font-size: var(--text-size);
+  font-weight: var(--text-weight);
+  line-height: var(--text-leading);
+  letter-spacing: var(--text-tracking);
+  color: var(--label);
+  text-align: center;
+  user-select: none;
+  max-width: 100%;
+}
+
+/* Peek — hangs below fold; translateY lifts more into view on hover.
+   Clipped by .app-frame overflow. Stays mounted so close handoff is stable. */
+.card-slot.is-peek {
+  position: absolute;
+  left: var(--pad);
+  right: var(--pad);
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: center;
+  pointer-events: auto;
+  will-change: transform;
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.card-slot.is-peek.is-occluded {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.card-slot.is-peek .card-hit {
+  width: 100%;
+  cursor: pointer;
+}
+
+/* Focus — viewport center */
+.card-slot.is-focus {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.card-fly {
+  pointer-events: auto;
+  display: flex;
+  justify-content: center;
+  will-change: transform;
+  transform-origin: center center;
+}
+
+.card-hit {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.card-slot.is-focus .card-hit {
+  width: auto;
+  cursor: grab;
+}
+
+.card-slot.is-focus .card-hit:active {
+  cursor: grabbing;
+}
+
+.card-tilt {
+  display: flex;
+  justify-content: center;
+  transform-style: preserve-3d;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+.card-footprint {
+  position: relative;
+  flex-shrink: 0;
+  transform-style: preserve-3d;
+  transform-origin: center center;
+}
+
+.card-footprint--peek {
+  width: 100%;
+  aspect-ratio: 579 / 1024;
+}
+
+.card-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  transform-style: preserve-3d;
+  perspective: 1200px;
+}
+
+.card-stage.is-live {
+  overflow: visible;
+  perspective: 1600px;
+  perspective-origin: 50% 50%;
+}
+
+.card-flip {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+.card-face {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  overflow: hidden;
+  background: #ececec;
+  transform-origin: center center;
+  box-shadow: 0 12px 36px rgb(0 0 0 / 40%);
+  transition: box-shadow 0.35s ease;
+}
+
+/* Match peek (no shadow) while rising/returning so handoff doesn’t flash */
+.card-footprint.is-flying .card-face {
+  box-shadow: none;
+}
+
+/* Docked front: landscape art rotated into portrait footprint */
+.card-face--docked {
+  width: calc(100% * 1024 / 579);
+  height: calc(100% * 579 / 1024);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(90deg);
+  box-shadow: none;
+}
+
+.card-face--back {
+  background: #111;
+  transform: rotateY(180deg);
+}
+
+/* Peek dock showing the portrait back (no 3D offset) */
+.card-face--peek-back {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: #111;
+  box-shadow: none;
+  transform: none;
+}
+
+.card-face img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  pointer-events: none;
+  user-select: none;
+}
+
+.card-wave {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 40%,
+    rgba(255, 255, 255, 0.55) 50%,
+    transparent 60%,
+    transparent 100%
+  );
+  background-size: 240% 100%;
+  animation: card-wave 2.2s linear infinite;
+  mix-blend-mode: soft-light;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 55%, transparent 72%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 55%, transparent 72%);
+}
+
+.card-wave--soft {
+  opacity: 0.35;
+  animation-duration: 3s;
+}
+
+@keyframes card-wave {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-slot.is-peek {
+    transition: none;
+  }
+
+  .card-wave {
+    display: none;
+  }
+
+  .card-face {
+    box-shadow: none;
+  }
+}
