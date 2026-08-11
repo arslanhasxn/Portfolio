@@ -37,9 +37,9 @@
   max-width: 100%;
 }
 
-/* Peek — hangs below fold; translateY lifts more into view on hover.
-   Clipped by .app-frame overflow. Stays mounted so close handoff is stable.
-   bottom inset clears Safari floating chrome via --chrome-bottom. */
+/* Peek — strip above Safari chrome (no hanging below the frame).
+   Inner clip grows on hover / invite; hit padding stays outside the clip.
+   Stays mounted so close handoff is stable. */
 .card-slot.is-peek {
   position: absolute;
   left: var(--pad);
@@ -49,8 +49,6 @@
   display: flex;
   justify-content: center;
   pointer-events: auto;
-  will-change: transform;
-  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .card-slot.is-peek.is-occluded {
@@ -65,6 +63,21 @@
   padding: 2.75rem 1.5rem 1.75rem;
   margin: -2.75rem -1.5rem -1.75rem;
   box-sizing: content-box;
+}
+
+.card-peek-clip {
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  /* height driven by peekReveal motion value */
+}
+
+.card-footprint--peek {
+  width: 100%;
+  aspect-ratio: 579 / 1024;
+  flex-shrink: 0;
 }
 
 /* Focus — visual viewport center; padded so the card never clips sideways */
@@ -128,11 +141,6 @@
   flex-shrink: 0;
   transform-style: preserve-3d;
   transform-origin: center center;
-}
-
-.card-footprint--peek {
-  width: 100%;
-  aspect-ratio: 579 / 1024;
 }
 
 .card-stage {
@@ -205,7 +213,8 @@
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: fill;
+  /* contain avoids stretch if box ratio drifts; faces are sized to match art */
+  object-fit: contain;
   pointer-events: none;
   user-select: none;
   -webkit-user-drag: none;
@@ -245,10 +254,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .card-slot.is-peek {
-    transition: none;
-  }
-
   .card-wave {
     display: none;
   }

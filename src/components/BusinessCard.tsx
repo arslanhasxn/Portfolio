@@ -55,7 +55,8 @@ const tiltSpring = {
 const INVITE_INITIAL_DELAY_MS = 2000
 /** Rest between peek invite nudge pairs */
 const INVITE_REST_MS = 3200
-const INVITE_LIFT = -12
+/** Extra peek height during invite tug (px) */
+const INVITE_LIFT = 12
 /** Idle swivel: cursor circling the card rim (degrees) */
 const IDLE_TILT = 2.65
 const IDLE_ORBIT_MS = 2800
@@ -106,13 +107,22 @@ function backWidth() {
 
 function syncChromeInset() {
   const vv = window.visualViewport
-  if (!vv) {
-    document.documentElement.style.setProperty('--vv-bottom', '0px')
-    document.documentElement.style.setProperty('--vv-top', '0px')
-    return
+  let bottom = 0
+  let top = 0
+  if (vv) {
+    const layoutH = Math.max(
+      window.innerHeight,
+      document.documentElement.clientHeight,
+    )
+    bottom = Math.max(0, layoutH - vv.height - vv.offsetTop)
+    top = Math.max(0, vv.offsetTop)
   }
-  const bottom = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
-  const top = Math.max(0, vv.offsetTop)
+  // iOS Safari floating chrome often reports 0 via visualViewport while still
+  // covering the bottom — keep a floor on coarse-pointer devices.
+  const coarse =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(hover: none) and (pointer: coarse)').matches
+  if (coarse) bottom = Math.max(bottom, 56)
   document.documentElement.style.setProperty('--vv-bottom', `${bottom}px`)
   document.documentElement.style.setProperty('--vv-top', `${top}px`)
 }
@@ -123,8 +133,10 @@ type DockPose = {
   riseW: number
   finalW: number
   rotate: number
-  /** Scale at dock so the rotated landscape matches the peek strip */
+  /** Scale at dock so the face matches the peek strip */
   dockScale: number
+  /** Width/height ratio for the active face */
+  ratio: number
 }
 
 export function BusinessCard() {
@@ -167,9 +179,15 @@ export function BusinessCard() {
   const flyRotate = useMotionValue(0)
   const flyScale = useMotionValue(1)
   const cardW = useMotionValue(frontWidth())
+  /** Explicit height — Safari drops aspect-ratio while width is animated */
+  const cardRatio = useMotionValue(FRONT_RATIO)
+  const cardH = useTransform(
+    [cardW, cardRatio],
+    ([w, r]) => (w as number) / (r as number),
+  )
   const backdropOp = useMotionValue(0)
-  /** Peek swipe-up invite bob */
-  const peekBobY = useMotionValue(0)
+  /** Peek strip height (base + invite tug) */
+  const peekReveal = useMotionValue(PEEK_PX)
   /** Focused card idle pivot (hint: interactive) */
   const idleRX = useMotionValue(0)
   const idleRY = useMotionValue(0)
@@ -196,7 +214,14 @@ export function BusinessCard() {
   const tiltTransform = useMotionTemplate`perspective(1100px) rotateX(${totalRX}deg) rotateY(${totalRY}deg)`
 
   const flySpring = reduceMotion ? { duration: 0 } : dockSpring
-  const peekLift = peekHover && !focused ? PEEK_PX + PEEK_HOVER_EXTRA : PEEK_PX
+  const peekBase = peekHover && !focused ? PEEK_PX + PEEK_HOVER_EXTRA : PEEK_PX
+
+  // Keep peek strip height in sync with hover (invite owns the value until first open)
+  useEffect(() => {
+    if (focused) return
+    if (!hasOpenedOnce && !peekHover && !reduceMotion) return
+    void animate(peekReveal, peekBase, reduceMotion ? { duration: 0 } : snappy)
+  }, [peekBase, focused, peekReveal, reduceMotion, hasOpenedOnce, peekHover])
 
   const clearTimers = () => {
     timers.current.forEach((t) => window.clearTimeout(t))
@@ -225,7 +250,7 @@ export function BusinessCard() {
   // Peek: quick pull-pull, then rest — swipe-up prompt (once per page load)
   useEffect(() => {
     if (focused || reduceMotion || peekHover || hasOpenedOnce) {
-      peekBobY.set(0)
+      peekReveal.set(peekBase)
       return
     }
     let cancelled = false
@@ -240,10 +265,11 @@ export function BusinessCard() {
       // Let the dock settle before prompting
       await sleep(INVITE_INITIAL_DELAY_MS)
       while (!cancelled) {
-        // Single keyframed pull-pull — no dead settle between tugs
+        const base = PEEK_PX
+        // Single keyframed pull-pull — grow strip height, no dead settle between tugs
         await animate(
-          peekBobY,
-          [0, INVITE_LIFT, INVITE_LIFT * 0.4, INVITE_LIFT, 0],
+          peekReveal,
+          [base, base + INVITE_LIFT, base + INVITE_LIFT * 0.4, base + INVITE_LIFT, base],
           {
             duration: 0.84,
             times: [0, 0.24, 0.42, 0.64, 1],
@@ -258,9 +284,9 @@ export function BusinessCard() {
     return () => {
       cancelled = true
       window.clearTimeout(restTimer)
-      peekBobY.set(0)
+      peekReveal.set(peekBase)
     }
-  }, [focused, reduceMotion, peekHover, hasOpenedOnce, peekBobY])
+  }, [focused, reduceMotion, peekHover, hasOpenedOnce, peekReveal, peekBase])
 
   // Focused: tilt follows a cursor circling the card edge
   useEffect(() => {
@@ -307,33 +333,29 @@ export function BusinessCard() {
       flyRotate.set(pose.rotate)
       flyScale.set(pose.dockScale)
       cardW.set(pose.riseW)
+      cardRatio.set(pose.ratio)
     }
     backdropOp.set(0)
     setPeekHover(false)
+    peekReveal.set(PEEK_PX)
     setMode('peek')
     setPhase('ready')
     pullKind.current = null
     dockPose.current = null
-  }, [backdropOp, flyX, flyY, flyRotate, flyScale, cardW])
+  }, [backdropOp, flyX, flyY, flyRotate, flyScale, cardW, cardRatio, peekReveal])
 
   const measureDockPose = useCallback((): DockPose => {
     const focusW = flipped ? backWidth() : frontWidth()
+    const ratio = flipped ? BACK_RATIO : FRONT_RATIO
     const rotate = flipped ? 0 : 90
     const peek = peekFootprintRef.current?.getBoundingClientRect()
     if (peek && peek.width > 1 && peek.height > 1) {
-      if (flipped) {
-        // Portrait back → grow width to peek strip (no rotate). Avoids snap on handoff.
-        return {
-          x: peek.left + peek.width / 2 - window.innerWidth / 2,
-          y: peek.top + peek.height / 2 - window.innerHeight / 2,
-          riseW: peek.width,
-          finalW: focusW,
-          rotate,
-          dockScale: 1,
-        }
-      }
-      // Landscape front → rotate + scale so visual width matches peek.
-      const dockScale = peek.width / Math.max(focusW / FRONT_RATIO, 1)
+      // Always keep natural face width; match peek with scale (+ rotate for front).
+      // Animating width to peek size was stretching faces in Safari.
+      const visualW = flipped
+        ? focusW
+        : focusW / FRONT_RATIO /* landscape height becomes visual width when rotated */
+      const dockScale = peek.width / Math.max(visualW, 1)
       return {
         x: peek.left + peek.width / 2 - window.innerWidth / 2,
         y: peek.top + peek.height / 2 - window.innerHeight / 2,
@@ -341,6 +363,7 @@ export function BusinessCard() {
         finalW: focusW,
         rotate,
         dockScale,
+        ratio,
       }
     }
 
@@ -354,6 +377,7 @@ export function BusinessCard() {
         finalW: focusW,
         rotate,
         dockScale: 1,
+        ratio,
       }
     }
     const fr = frame.getBoundingClientRect()
@@ -366,17 +390,8 @@ export function BusinessCard() {
     const peekW = peekSlotWidth()
     const peekH = peekW / BACK_RATIO
     const top = fr.bottom - chrome - PEEK_PX
-    if (flipped) {
-      return {
-        x: fr.left + fr.width / 2 - window.innerWidth / 2,
-        y: top + peekH / 2 - window.innerHeight / 2,
-        riseW: peekW,
-        finalW: focusW,
-        rotate,
-        dockScale: 1,
-      }
-    }
-    const dockScale = peekW / Math.max(focusW / FRONT_RATIO, 1)
+    const visualW = flipped ? focusW : focusW / FRONT_RATIO
+    const dockScale = peekW / Math.max(visualW, 1)
     return {
       x: fr.left + fr.width / 2 - window.innerWidth / 2,
       y: top + peekH / 2 - window.innerHeight / 2,
@@ -384,6 +399,7 @@ export function BusinessCard() {
       finalW: focusW,
       rotate,
       dockScale,
+      ratio,
     }
   }, [flipped])
 
@@ -394,14 +410,16 @@ export function BusinessCard() {
       flyRotate.set(lerp(pose.rotate, 0, t))
       flyScale.set(lerp(pose.dockScale, 1, t))
       cardW.set(lerp(pose.riseW, pose.finalW, t))
+      cardRatio.set(pose.ratio)
       backdropOp.set(t)
     },
-    [flyX, flyY, flyRotate, flyScale, cardW, backdropOp],
+    [flyX, flyY, flyRotate, flyScale, cardW, cardRatio, backdropOp],
   )
 
   const animateToPose = useCallback(
     async (pose: DockPose, t: number, onDone?: () => void) => {
       flyAnimRef.current?.stop()
+      cardRatio.set(pose.ratio)
       const tw = reduceMotion ? { duration: 0 } : flySpring
       const ctrls = [
         animate(flyX, lerp(pose.x, 0, t), tw),
@@ -424,6 +442,7 @@ export function BusinessCard() {
       flyRotate,
       flyScale,
       cardW,
+      cardRatio,
       backdropOp,
       flySpring,
       reduceMotion,
@@ -568,6 +587,7 @@ export function BusinessCard() {
       didPull.current = true
       flipY.set(flipped ? 180 : 0)
       flipX.set(0)
+      cardRatio.set(pose.ratio)
       applyPose(pose, 0)
       setPeekHover(false)
       setHasOpenedOnce(true)
@@ -581,7 +601,7 @@ export function BusinessCard() {
         t: performance.now(),
       }
     },
-    [mode, measureDockPose, applyPose, flipped, flipY, flipX],
+    [mode, measureDockPose, applyPose, flipped, flipY, flipX, cardRatio],
   )
 
   const beginCloseScrub = useCallback(() => {
@@ -685,6 +705,7 @@ export function BusinessCard() {
     clearTimers()
     const pose = measureDockPose()
     dockPose.current = pose
+    cardRatio.set(pose.ratio)
     applyPose(pose, 0)
     setPeekHover(false)
     flipY.set(flipped ? 180 : 0)
@@ -699,6 +720,7 @@ export function BusinessCard() {
     flipped,
     flipY,
     flipX,
+    cardRatio,
     animateToPose,
   ])
 
@@ -828,7 +850,9 @@ export function BusinessCard() {
       setFlipped(goingToBack)
       flipY.set(goingToBack ? 180 : 0)
       flipX.set(0)
-      cardW.set(goingToBack ? backWidth() : frontWidth())
+      const endW = goingToBack ? backWidth() : frontWidth()
+      cardW.set(endW)
+      cardRatio.set(goingToBack ? BACK_RATIO : FRONT_RATIO)
       return
     }
 
@@ -844,6 +868,7 @@ export function BusinessCard() {
     const startY = flipY.get()
     const endY = startY + yDir * 180
     const endW = goingToBack ? backWidth() : frontWidth()
+    const endRatio = goingToBack ? BACK_RATIO : FRONT_RATIO
     let swapped = false
 
     const yAnim = animate(flipY, endY, {
@@ -853,6 +878,7 @@ export function BusinessCard() {
         if (!swapped && t >= 0.5) {
           swapped = true
           setFlipped(goingToBack)
+          cardRatio.set(endRatio)
         }
       },
     })
@@ -875,6 +901,7 @@ export function BusinessCard() {
     flipY.set(goingToBack ? yDir * 180 : 0)
     flipX.set(0)
     cardW.set(endW)
+    cardRatio.set(endRatio)
     setFlipping(false)
   }
 
@@ -968,9 +995,6 @@ export function BusinessCard() {
 
       <div
         className={`card-slot is-peek${peekOccluded ? ' is-occluded' : ''}`}
-        style={{
-          transform: `translateY(calc(100% - ${peekLift}px))`,
-        }}
         onMouseEnter={() => {
           if (!focused) setPeekHover(true)
         }}
@@ -987,10 +1011,7 @@ export function BusinessCard() {
           onPointerUp={onPeekPointerUp}
           onPointerCancel={onPeekPointerUp}
         >
-          <motion.div
-            className="card-tilt"
-            style={{ width: '100%', y: peekBobY }}
-          >
+          <motion.div className="card-peek-clip" style={{ height: peekReveal }}>
             <div
               ref={peekFootprintRef}
               className="card-footprint card-footprint--peek"
@@ -1057,7 +1078,7 @@ export function BusinessCard() {
                   className={`card-footprint${flying ? ' is-flying' : ''}`}
                   style={{
                     width: cardW,
-                    aspectRatio: flipped ? '579 / 1024' : '1024 / 579',
+                    height: cardH,
                   }}
                 >
                   <div className="card-stage is-live">
