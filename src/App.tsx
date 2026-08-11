@@ -25,11 +25,7 @@ export default function App() {
           </div>
 
           <header className="cell cell-brand">
-            <h1 className="brand">
-              ARSLAN
-              <br />
-              HASAN
-            </h1>
+            <h1 className="brand">ARSLAN HASAN</h1>
           </header>
 
           <nav className="cell cell-projects" aria-label="Projects">

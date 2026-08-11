@@ -13,9 +13,12 @@
   position: absolute;
   left: var(--pad);
   right: var(--pad);
-  /* Fixed above the default peek strip — does not follow hover/focus */
-  bottom: calc(28px + var(--text-leading) + 0.5rem);
-  z-index: 32;
+  /* Fixed above the default peek strip — does not follow hover/focus.
+     Lifted by --chrome-bottom so Safari’s floating bar doesn’t cover it. */
+  bottom: calc(
+    28px + var(--text-leading) + 0.5rem + var(--chrome-bottom, 0px)
+  );
+  z-index: 28;
   display: flex;
   justify-content: center;
   pointer-events: none;
@@ -35,12 +38,13 @@
 }
 
 /* Peek — hangs below fold; translateY lifts more into view on hover.
-   Clipped by .app-frame overflow. Stays mounted so close handoff is stable. */
+   Clipped by .app-frame overflow. Stays mounted so close handoff is stable.
+   bottom inset clears Safari floating chrome via --chrome-bottom. */
 .card-slot.is-peek {
   position: absolute;
   left: var(--pad);
   right: var(--pad);
-  bottom: 0;
+  bottom: var(--chrome-bottom, 0px);
   z-index: 30;
   display: flex;
   justify-content: center;
@@ -57,18 +61,25 @@
 .card-slot.is-peek .card-hit {
   width: 100%;
   cursor: pointer;
+  /* Extra hit area above/beside the peek strip */
+  padding: 2.75rem 1.5rem 1.75rem;
+  margin: -2.75rem -1.5rem -1.75rem;
+  box-sizing: content-box;
 }
 
-/* Focus — viewport center */
+/* Focus — visual viewport center; padded so the card never clips sideways */
 .card-slot.is-focus {
   position: fixed;
   inset: 0;
-  z-index: 30;
+  z-index: 40;
   display: flex;
   align-items: center;
   justify-content: center;
   pointer-events: none;
   overflow: visible;
+  padding: 0 max(1rem, env(safe-area-inset-left, 0px))
+    var(--chrome-bottom, 0px) max(1rem, env(safe-area-inset-right, 0px));
+  box-sizing: border-box;
 }
 
 .card-fly {
@@ -94,6 +105,10 @@
 .card-slot.is-focus .card-hit {
   width: auto;
   cursor: grab;
+  /* Generous grab ring around the focused card */
+  padding: 2.25rem;
+  margin: -2.25rem;
+  box-sizing: content-box;
 }
 
 .card-slot.is-focus .card-hit:active {
@@ -190,10 +205,10 @@
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  object-position: center;
+  object-fit: fill;
   pointer-events: none;
   user-select: none;
+  -webkit-user-drag: none;
 }
 
 .card-wave {
