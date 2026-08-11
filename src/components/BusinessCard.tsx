@@ -33,16 +33,21 @@ const PULL_VELOCITY = 650
 const BACK_RATIO = 579 / 1024
 const FRONT_RATIO = 1024 / 579
 
-const snappy = {
-  type: 'spring' as const,
-  visualDuration: 0.28,
-  bounce: 0.05,
-}
-
+/**
+ * Dock flight — slight overshoot past the rest pose, then ease back.
+ * Keep bounce low so it reads as smooth, not bouncy.
+ */
 const dockSpring = {
   type: 'spring' as const,
-  visualDuration: 0.42,
-  bounce: 0,
+  visualDuration: 0.5,
+  bounce: 0.12,
+}
+
+/** Non-overshooting channels (width / backdrop) — clean ease alongside the spring */
+const dockFade = {
+  type: 'tween' as const,
+  duration: 0.4,
+  ease: [0.22, 1, 0.36, 1] as const,
 }
 
 const tiltSpring = {
@@ -55,13 +60,33 @@ const tiltSpring = {
 const INVITE_INITIAL_DELAY_MS = 2000
 /** Rest between peek invite nudge pairs */
 const INVITE_REST_MS = 3200
-/** Extra peek height during invite tug (px) */
-const INVITE_LIFT = 12
+const INVITE_LIFT = -12
 /** Idle swivel: cursor circling the card rim (degrees) */
 const IDLE_TILT = 2.65
 const IDLE_ORBIT_MS = 2800
-/** Dock-down only if press started in the upper half; bottom edge can flip */
-const DOCK_START_OY_MAX = 0.48
+/**
+ * Dock-down if press started above this (normalized Y on the *visual* card).
+ * Values < 0 = started in the hit padding above the card.
+ * Bottom band stays flip-friendly.
+ */
+const DOCK_START_OY_MAX = 0.75
+/** Gap just under COMPONENT LIBRARY before pull-up begins */
+const OPEN_GAP_BELOW_PROJECTS = 8
+
+/** Y below which a swipe-up can open the card (just under last project link) */
+function openSwipeMinY() {
+  const links = document.querySelectorAll('.cell-projects .project-link')
+  const last = links[links.length - 1] as HTMLElement | undefined
+  if (last) {
+    return last.getBoundingClientRect().bottom + OPEN_GAP_BELOW_PROJECTS
+  }
+  const projects = document.querySelector('.cell-projects')
+  if (projects) {
+    return projects.getBoundingClientRect().bottom + OPEN_GAP_BELOW_PROJECTS
+  }
+  const { h } = viewSize()
+  return h * 0.45
+}
 
 const flipTween = {
   type: 'tween' as const,
@@ -105,28 +130,6 @@ function backWidth() {
   return (frontWidth() / FRONT_RATIO) * 1.12
 }
 
-function syncChromeInset() {
-  const vv = window.visualViewport
-  let bottom = 0
-  let top = 0
-  if (vv) {
-    const layoutH = Math.max(
-      window.innerHeight,
-      document.documentElement.clientHeight,
-    )
-    bottom = Math.max(0, layoutH - vv.height - vv.offsetTop)
-    top = Math.max(0, vv.offsetTop)
-  }
-  // iOS Safari floating chrome often reports 0 via visualViewport while still
-  // covering the bottom — keep a floor on coarse-pointer devices.
-  const coarse =
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(hover: none) and (pointer: coarse)').matches
-  if (coarse) bottom = Math.max(bottom, 56)
-  document.documentElement.style.setProperty('--vv-bottom', `${bottom}px`)
-  document.documentElement.style.setProperty('--vv-top', `${top}px`)
-}
-
 type DockPose = {
   x: number
   y: number
@@ -168,6 +171,11 @@ export function BusinessCard() {
   const timers = useRef<number[]>([])
   const pressing = useRef(false)
   const flyAnimRef = useRef<{ stop: () => void } | null>(null)
+  /** Mirrors phase for gesture handlers (avoids stale-closure misses on mobile) */
+  const phaseRef = useRef<FocusPhase>(phase)
+  phaseRef.current = phase
+  const flippingRef = useRef(flipping)
+  flippingRef.current = flipping
 
   const flipY = useMotionValue(0)
   const flipX = useMotionValue(0)
@@ -179,15 +187,15 @@ export function BusinessCard() {
   const flyRotate = useMotionValue(0)
   const flyScale = useMotionValue(1)
   const cardW = useMotionValue(frontWidth())
-  /** Explicit height — Safari drops aspect-ratio while width is animated */
+  /** Explicit height — keeps face ratio stable (no Safari aspect-ratio drop) */
   const cardRatio = useMotionValue(FRONT_RATIO)
   const cardH = useTransform(
     [cardW, cardRatio],
     ([w, r]) => (w as number) / (r as number),
   )
   const backdropOp = useMotionValue(0)
-  /** Peek strip height (base + invite tug) */
-  const peekReveal = useMotionValue(PEEK_PX)
+  /** Peek swipe-up invite bob */
+  const peekBobY = useMotionValue(0)
   /** Focused card idle pivot (hint: interactive) */
   const idleRX = useMotionValue(0)
   const idleRY = useMotionValue(0)
@@ -213,15 +221,7 @@ export function BusinessCard() {
   )
   const tiltTransform = useMotionTemplate`perspective(1100px) rotateX(${totalRX}deg) rotateY(${totalRY}deg)`
 
-  const flySpring = reduceMotion ? { duration: 0 } : dockSpring
-  const peekBase = peekHover && !focused ? PEEK_PX + PEEK_HOVER_EXTRA : PEEK_PX
-
-  // Keep peek strip height in sync with hover (invite owns the value until first open)
-  useEffect(() => {
-    if (focused) return
-    if (!hasOpenedOnce && !peekHover && !reduceMotion) return
-    void animate(peekReveal, peekBase, reduceMotion ? { duration: 0 } : snappy)
-  }, [peekBase, focused, peekReveal, reduceMotion, hasOpenedOnce, peekHover])
+  const peekLift = peekHover && !focused ? PEEK_PX + PEEK_HOVER_EXTRA : PEEK_PX
 
   const clearTimers = () => {
     timers.current.forEach((t) => window.clearTimeout(t))
@@ -234,15 +234,7 @@ export function BusinessCard() {
   }, [rotateXRaw, rotateYRaw])
 
   useEffect(() => {
-    syncChromeInset()
-    const vv = window.visualViewport
-    vv?.addEventListener('resize', syncChromeInset)
-    vv?.addEventListener('scroll', syncChromeInset)
-    window.addEventListener('resize', syncChromeInset)
     return () => {
-      vv?.removeEventListener('resize', syncChromeInset)
-      vv?.removeEventListener('scroll', syncChromeInset)
-      window.removeEventListener('resize', syncChromeInset)
       clearTimers()
     }
   }, [])
@@ -250,7 +242,7 @@ export function BusinessCard() {
   // Peek: quick pull-pull, then rest — swipe-up prompt (once per page load)
   useEffect(() => {
     if (focused || reduceMotion || peekHover || hasOpenedOnce) {
-      peekReveal.set(peekBase)
+      peekBobY.set(0)
       return
     }
     let cancelled = false
@@ -265,11 +257,10 @@ export function BusinessCard() {
       // Let the dock settle before prompting
       await sleep(INVITE_INITIAL_DELAY_MS)
       while (!cancelled) {
-        const base = PEEK_PX
-        // Single keyframed pull-pull — grow strip height, no dead settle between tugs
+        // Single keyframed pull-pull — no dead settle between tugs
         await animate(
-          peekReveal,
-          [base, base + INVITE_LIFT, base + INVITE_LIFT * 0.4, base + INVITE_LIFT, base],
+          peekBobY,
+          [0, INVITE_LIFT, INVITE_LIFT * 0.4, INVITE_LIFT, 0],
           {
             duration: 0.84,
             times: [0, 0.24, 0.42, 0.64, 1],
@@ -284,11 +275,12 @@ export function BusinessCard() {
     return () => {
       cancelled = true
       window.clearTimeout(restTimer)
-      peekReveal.set(peekBase)
+      peekBobY.set(0)
     }
-  }, [focused, reduceMotion, peekHover, hasOpenedOnce, peekReveal, peekBase])
+  }, [focused, reduceMotion, peekHover, hasOpenedOnce, peekBobY])
 
   // Focused: tilt follows a cursor circling the card edge
+  // Delay start so it doesn't feel like a settle after dock-up lands
   useEffect(() => {
     if (!interactive || reduceMotion) {
       idleRX.set(0)
@@ -297,25 +289,30 @@ export function BusinessCard() {
     }
     let cancelled = false
     let raf = 0
-    const t0 = performance.now()
+    let t0 = 0
 
-    const frame = (now: number) => {
+    const startTimer = window.setTimeout(() => {
       if (cancelled) return
-      if (pressing.current) {
-        idleRX.set(0)
-        idleRY.set(0)
+      t0 = performance.now()
+      const frame = (now: number) => {
+        if (cancelled) return
+        if (pressing.current) {
+          idleRX.set(0)
+          idleRY.set(0)
+          raf = requestAnimationFrame(frame)
+          return
+        }
+        const t = ((now - t0) / IDLE_ORBIT_MS) * Math.PI * 2
+        idleRX.set(Math.sin(t) * IDLE_TILT)
+        idleRY.set(Math.cos(t) * IDLE_TILT)
         raf = requestAnimationFrame(frame)
-        return
       }
-      const t = ((now - t0) / IDLE_ORBIT_MS) * Math.PI * 2
-      // Point on the rim → pitch/yaw toward that edge
-      idleRX.set(Math.sin(t) * IDLE_TILT)
-      idleRY.set(Math.cos(t) * IDLE_TILT)
       raf = requestAnimationFrame(frame)
-    }
-    raf = requestAnimationFrame(frame)
+    }, 420)
+
     return () => {
       cancelled = true
+      window.clearTimeout(startTimer)
       cancelAnimationFrame(raf)
       idleRX.set(0)
       idleRY.set(0)
@@ -325,7 +322,7 @@ export function BusinessCard() {
   const finishClose = useCallback(() => {
     flyAnimRef.current?.stop()
     flyAnimRef.current = null
-    // Land exactly on dock pose before swapping to peek
+    // Snap exact dock pose, then reveal peek (avoids a settle pop on handoff)
     const pose = dockPose.current
     if (pose) {
       flyX.set(pose.x)
@@ -336,13 +333,30 @@ export function BusinessCard() {
       cardRatio.set(pose.ratio)
     }
     backdropOp.set(0)
+    flipX.set(0)
+    idleRX.set(0)
+    idleRY.set(0)
+    resetTilt()
     setPeekHover(false)
-    peekReveal.set(PEEK_PX)
+    peekBobY.set(0)
     setMode('peek')
     setPhase('ready')
     pullKind.current = null
     dockPose.current = null
-  }, [backdropOp, flyX, flyY, flyRotate, flyScale, cardW, cardRatio, peekReveal])
+  }, [
+    backdropOp,
+    flyX,
+    flyY,
+    flyRotate,
+    flyScale,
+    cardW,
+    cardRatio,
+    flipX,
+    idleRX,
+    idleRY,
+    peekBobY,
+    resetTilt,
+  ])
 
   const measureDockPose = useCallback((): DockPose => {
     const focusW = flipped ? backWidth() : frontWidth()
@@ -350,11 +364,11 @@ export function BusinessCard() {
     const rotate = flipped ? 0 : 90
     const peek = peekFootprintRef.current?.getBoundingClientRect()
     if (peek && peek.width > 1 && peek.height > 1) {
-      // Always keep natural face width; match peek with scale (+ rotate for front).
-      // Animating width to peek size was stretching faces in Safari.
+      // Keep natural face width; match peek with scale (+ rotate for front).
+      // Animating width to peek size was squishing faces after dock/reopen.
       const visualW = flipped
         ? focusW
-        : focusW / FRONT_RATIO /* landscape height becomes visual width when rotated */
+        : focusW / FRONT_RATIO /* landscape height → visual width when rotated */
       const dockScale = peek.width / Math.max(visualW, 1)
       return {
         x: peek.left + peek.width / 2 - window.innerWidth / 2,
@@ -381,15 +395,9 @@ export function BusinessCard() {
       }
     }
     const fr = frame.getBoundingClientRect()
-    const chrome =
-      parseFloat(
-        getComputedStyle(document.documentElement).getPropertyValue(
-          '--vv-bottom',
-        ),
-      ) || 0
     const peekW = peekSlotWidth()
     const peekH = peekW / BACK_RATIO
-    const top = fr.bottom - chrome - PEEK_PX
+    const top = fr.bottom - PEEK_PX
     const visualW = flipped ? focusW : focusW / FRONT_RATIO
     const dockScale = peekW / Math.max(visualW, 1)
     return {
@@ -420,19 +428,32 @@ export function BusinessCard() {
     async (pose: DockPose, t: number, onDone?: () => void) => {
       flyAnimRef.current?.stop()
       cardRatio.set(pose.ratio)
-      const tw = reduceMotion ? { duration: 0 } : flySpring
+      const spring = reduceMotion ? { duration: 0 } : dockSpring
+      const fade = reduceMotion ? { duration: 0 } : dockFade
+      const endX = lerp(pose.x, 0, t)
+      const endY = lerp(pose.y, 0, t)
+      const endR = lerp(pose.rotate, 0, t)
+      const endS = lerp(pose.dockScale, 1, t)
+      const endW = lerp(pose.riseW, pose.finalW, t)
+      // Spring overshoot on motion; width/opacity stay clean
       const ctrls = [
-        animate(flyX, lerp(pose.x, 0, t), tw),
-        animate(flyY, lerp(pose.y, 0, t), tw),
-        animate(flyRotate, lerp(pose.rotate, 0, t), tw),
-        animate(flyScale, lerp(pose.dockScale, 1, t), tw),
-        animate(cardW, lerp(pose.riseW, pose.finalW, t), tw),
-        animate(backdropOp, t, reduceMotion ? { duration: 0 } : snappy),
+        animate(flyX, endX, spring),
+        animate(flyY, endY, spring),
+        animate(flyRotate, endR, { ...spring, bounce: 0.08 }),
+        animate(flyScale, endS, { ...spring, bounce: 0.09 }),
+        animate(cardW, endW, fade),
+        animate(backdropOp, t, fade),
       ]
       flyAnimRef.current = {
         stop: () => ctrls.forEach((c) => c.stop()),
       }
       await Promise.all(ctrls)
+      flyX.set(endX)
+      flyY.set(endY)
+      flyRotate.set(endR)
+      flyScale.set(endS)
+      cardW.set(endW)
+      backdropOp.set(t)
       flyAnimRef.current = null
       onDone?.()
     },
@@ -444,7 +465,6 @@ export function BusinessCard() {
       cardW,
       cardRatio,
       backdropOp,
-      flySpring,
       reduceMotion,
     ],
   )
@@ -524,6 +544,9 @@ export function BusinessCard() {
 
   const finishOpenScrub = useCallback(
     (clientY: number) => {
+      if (pullKind.current !== 'open') return
+      pullKind.current = null
+
       const start = pointerStart.current
       const pose = dockPose.current
       if (!pose) {
@@ -540,7 +563,6 @@ export function BusinessCard() {
         setPhase('opening')
         void animateToPose(pose, 1, () => {
           setPhase('ready')
-          pullKind.current = null
         })
       } else {
         setPhase('closing')
@@ -552,6 +574,10 @@ export function BusinessCard() {
 
   const finishCloseScrub = useCallback(
     (clientY: number) => {
+      // Idempotent — card pointerup and window listener may both fire
+      if (pullKind.current !== 'close') return
+      pullKind.current = null
+
       const start = pointerStart.current
       const pose = dockPose.current
       if (!pose) {
@@ -571,7 +597,6 @@ export function BusinessCard() {
         setPhase('opening')
         void animateToPose(pose, 1, () => {
           setPhase('ready')
-          pullKind.current = null
         })
       }
     },
@@ -605,43 +630,42 @@ export function BusinessCard() {
   )
 
   const beginCloseScrub = useCallback(() => {
-    if (!interactive) return
+    if (pullKind.current) return
+    if (phaseRef.current !== 'ready' || flippingRef.current) return
     const pose = measureDockPose()
     dockPose.current = pose
     pullKind.current = 'close'
     didPull.current = true
     resetTilt()
     setPhase('scrubbing')
-  }, [interactive, measureDockPose, resetTilt])
+  }, [measureDockPose, resetTilt])
 
-  // Bottom 60% swipe-up → pull open
+  // Just below COMPONENT LIBRARY → swipe up to pull open (full width)
   useEffect(() => {
     if (focused || reduceMotion) return
 
     let tracking = false
     let startX = 0
     let startY = 0
-    let startedOnUi = false
 
     const onDown = (e: PointerEvent) => {
       if (pullKind.current) return
       const target = e.target as Element | null
-      if (target?.closest('a, .face-link, .card-hit')) {
-        startedOnUi = true
-        return
-      }
-      startedOnUi = false
-      const { h } = viewSize()
-      const vv = window.visualViewport
-      const y = e.clientY - (vv?.offsetTop ?? 0)
-      if (y < h * 0.4) return
+      // Keep project links + face tappable; everything else below the text can pull up
+      if (target?.closest('a.project-link, a.face-link, .face-link')) return
+      if (e.clientY < openSwipeMinY()) return
       tracking = true
       startX = e.clientX
       startY = e.clientY
     }
 
     const onMove = (e: PointerEvent) => {
-      if (!tracking || startedOnUi) return
+      if (!tracking) return
+      if (pullKind.current === 'open') {
+        updateOpenScrub(e.clientY)
+        e.preventDefault()
+        return
+      }
       const dx = e.clientX - startX
       const dy = e.clientY - startY
       if (dy < -AXIS_LOCK && Math.abs(dy) > Math.abs(dx)) {
@@ -652,9 +676,15 @@ export function BusinessCard() {
       }
     }
 
-    const onUp = () => {
+    const onUp = (e: PointerEvent) => {
       tracking = false
-      startedOnUi = false
+      // Finish even if React hasn't committed `scrubbing` yet
+      if (pullKind.current === 'open') {
+        finishOpenScrub(e.clientY)
+        pointerStart.current = null
+        pressing.current = false
+        axisLock.current = null
+      }
     }
 
     window.addEventListener('pointerdown', onDown, { passive: true })
@@ -667,7 +697,93 @@ export function BusinessCard() {
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
     }
-  }, [focused, reduceMotion, beginOpenScrub, updateOpenScrub])
+  }, [
+    focused,
+    reduceMotion,
+    beginOpenScrub,
+    updateOpenScrub,
+    finishOpenScrub,
+  ])
+
+  // Focused: anywhere above the card (full width) → swipe down to dock
+  useEffect(() => {
+    if (!focused || reduceMotion) return
+
+    let tracking = false
+    let startX = 0
+    let startY = 0
+
+    const cardTop = () =>
+      focusFootprintRef.current?.getBoundingClientRect().top ?? Infinity
+
+    const onDown = (e: PointerEvent) => {
+      if (pullKind.current) return
+      if (phaseRef.current !== 'ready' || flippingRef.current) return
+      const target = e.target as Element | null
+      if (target?.closest('a, .face-link')) return
+      // Full-width band above the *visual* card top (even if hit padding covers it)
+      if (e.clientY >= cardTop()) return
+
+      tracking = true
+      startX = e.clientX
+      startY = e.clientY
+    }
+
+    const onMove = (e: PointerEvent) => {
+      if (pullKind.current === 'close') {
+        updateCloseScrub(e.clientY)
+        e.preventDefault()
+        return
+      }
+      if (!tracking) return
+      const dx = e.clientX - startX
+      const dy = e.clientY - startY
+      if (dy > AXIS_LOCK && Math.abs(dy) > Math.abs(dx) * 0.85) {
+        tracking = false
+        pointerStart.current = {
+          x: startX,
+          y: startY,
+          ox: 0.5,
+          oy: -0.35,
+          t: performance.now(),
+        }
+        pressing.current = true
+        didPull.current = true
+        axisLock.current = 'v'
+        beginCloseScrub()
+        updateCloseScrub(e.clientY)
+        e.preventDefault()
+      }
+    }
+
+    const onUp = (e: PointerEvent) => {
+      tracking = false
+      if (pullKind.current === 'close') {
+        finishCloseScrub(e.clientY)
+        pressing.current = false
+        pointerStart.current = null
+        axisLock.current = null
+      }
+    }
+
+    const opts = { capture: true } as const
+    window.addEventListener('pointerdown', onDown, { ...opts, passive: true })
+    window.addEventListener('pointermove', onMove, { ...opts, passive: false })
+    window.addEventListener('pointerup', onUp, opts)
+    window.addEventListener('pointercancel', onUp, opts)
+    return () => {
+      window.removeEventListener('pointerdown', onDown, opts)
+      window.removeEventListener('pointermove', onMove, opts)
+      window.removeEventListener('pointerup', onUp, opts)
+      window.removeEventListener('pointercancel', onUp, opts)
+    }
+  }, [
+    focused,
+    reduceMotion,
+    beginCloseScrub,
+    updateCloseScrub,
+    finishCloseScrub,
+  ])
 
   // Scrub move/up while pulling
   useEffect(() => {
@@ -760,8 +876,11 @@ export function BusinessCard() {
       /* ok */
     }
 
-    if (pullKind.current === 'open' && scrubbing) {
-      // window scrub handler finishes
+    // Finish pull-open here so a fast flick isn't lost waiting on React state
+    if (pullKind.current === 'open') {
+      finishOpenScrub(e.clientY)
+      pointerStart.current = null
+      axisLock.current = null
       return
     }
 
@@ -788,13 +907,14 @@ export function BusinessCard() {
     axisLock.current = null
     idleRX.set(0)
     idleRY.set(0)
-    const el = cardRef.current
-    const rect = el?.getBoundingClientRect()
-    const ox = rect
-      ? (e.clientX - rect.left) / Math.max(rect.width, 1)
+    // Normalize against the visible card, not the padded hit box —
+    // presses in the top padding get oy < 0 → dock zone.
+    const card = focusFootprintRef.current?.getBoundingClientRect()
+    const ox = card
+      ? (e.clientX - card.left) / Math.max(card.width, 1)
       : 0.5
-    const oy = rect
-      ? (e.clientY - rect.top) / Math.max(rect.height, 1)
+    const oy = card
+      ? (e.clientY - card.top) / Math.max(card.height, 1)
       : 0.5
     pointerStart.current = {
       x: e.clientX,
@@ -810,21 +930,25 @@ export function BusinessCard() {
   const onPointerMove = (e: ReactPointerEvent) => {
     if (!pressing.current || !pointerStart.current) return
 
-    if (scrubbing && pullKind.current === 'close') {
+    // Prefer pullKind ref — React `scrubbing` may lag one frame on mobile
+    if (pullKind.current === 'close') {
       updateCloseScrub(e.clientY)
       return
     }
 
-    if (!interactive) return
+    if (phaseRef.current !== 'ready' || flippingRef.current) return
 
     const dx = e.clientX - pointerStart.current.x
     const dy = e.clientY - pointerStart.current.y
     const dist = Math.hypot(dx, dy)
 
     if (!axisLock.current && dist > AXIS_LOCK) {
-      const vertical = Math.abs(dy) > Math.abs(dx) * 1.05
-      if (vertical && dy > 0 && pointerStart.current.oy < DOCK_START_OY_MAX) {
-        // Upper half + drag down → dock
+      const vertical = Math.abs(dy) > Math.abs(dx) * 0.9
+      const oy = pointerStart.current.oy
+      // Top of card (and padding above): prefer dock even with mild diagonal
+      const fromTop = oy < 0.45
+      const fromDockZone = oy < DOCK_START_OY_MAX
+      if (dy > 0 && ((fromTop && dy > Math.abs(dx) * 0.75) || (vertical && fromDockZone))) {
         axisLock.current = 'v'
         beginCloseScrub()
         updateCloseScrub(e.clientY)
@@ -832,11 +956,6 @@ export function BusinessCard() {
       }
       // Bottom edge (or sideways) → flip territory
       axisLock.current = 'h'
-    }
-
-    if (axisLock.current === 'v' && pullKind.current === 'close') {
-      updateCloseScrub(e.clientY)
-      return
     }
 
     if (dist > AXIS_LOCK) didMove.current = true
@@ -914,9 +1033,15 @@ export function BusinessCard() {
       /* ok */
     }
 
-    if (pullKind.current === 'close' && scrubbing) return
+    // Finish dock scrub here so a fast flick isn't lost waiting on React state
+    if (pullKind.current === 'close') {
+      finishCloseScrub(e.clientY)
+      pointerStart.current = null
+      axisLock.current = null
+      return
+    }
 
-    if (start && focused && phase === 'ready' && !flipping) {
+    if (start && focused && phaseRef.current === 'ready' && !flippingRef.current) {
       const dx = e.clientX - start.x
       const dy = e.clientY - start.y
       const dist = Math.hypot(dx, dy)
@@ -985,7 +1110,80 @@ export function BusinessCard() {
           aria-label="Dismiss business card"
           style={{ opacity: backdropOp }}
           transition={{ duration: 0 }}
-          onClick={dismiss}
+          onPointerDown={(e) => {
+            if (phaseRef.current !== 'ready' || flippingRef.current) return
+            if (pullKind.current) return
+            const card = focusFootprintRef.current?.getBoundingClientRect()
+            const aboveCard = !!card && e.clientY < card.top
+            pointerStart.current = {
+              x: e.clientX,
+              y: e.clientY,
+              ox: 0.5,
+              oy: aboveCard ? -0.35 : 0.5,
+              t: performance.now(),
+            }
+            pressing.current = true
+            didPull.current = false
+            axisLock.current = null
+            ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+          }}
+          onPointerMove={(e) => {
+            if (!pressing.current || !pointerStart.current) return
+            if (pullKind.current === 'close') {
+              updateCloseScrub(e.clientY)
+              return
+            }
+            if (phaseRef.current !== 'ready') return
+            // Only pull-to-dock when the gesture began above the card
+            if (pointerStart.current.oy >= 0) return
+            const dx = e.clientX - pointerStart.current.x
+            const dy = e.clientY - pointerStart.current.y
+            if (dy > AXIS_LOCK && Math.abs(dy) > Math.abs(dx) * 0.85) {
+              axisLock.current = 'v'
+              didPull.current = true
+              beginCloseScrub()
+              updateCloseScrub(e.clientY)
+            }
+          }}
+          onPointerUp={(e) => {
+            try {
+              ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+            } catch {
+              /* ok */
+            }
+            if (pullKind.current === 'close') {
+              finishCloseScrub(e.clientY)
+              pressing.current = false
+              pointerStart.current = null
+              axisLock.current = null
+              return
+            }
+            const start = pointerStart.current
+            pressing.current = false
+            pointerStart.current = null
+            axisLock.current = null
+            // Tap on backdrop (no pull) → dismiss
+            if (
+              start &&
+              !didPull.current &&
+              Math.hypot(e.clientX - start.x, e.clientY - start.y) < AXIS_LOCK
+            ) {
+              dismiss()
+            }
+          }}
+          onPointerCancel={(e) => {
+            try {
+              ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+            } catch {
+              /* ok */
+            }
+            if (pullKind.current === 'close') {
+              finishCloseScrub(e.clientY)
+            }
+            pressing.current = false
+            pointerStart.current = null
+            axisLock.current = null
+          }}
         />
       )}
 
@@ -995,6 +1193,9 @@ export function BusinessCard() {
 
       <div
         className={`card-slot is-peek${peekOccluded ? ' is-occluded' : ''}`}
+        style={{
+          transform: `translateY(calc(100% - ${peekLift}px))`,
+        }}
         onMouseEnter={() => {
           if (!focused) setPeekHover(true)
         }}
@@ -1011,7 +1212,10 @@ export function BusinessCard() {
           onPointerUp={onPeekPointerUp}
           onPointerCancel={onPeekPointerUp}
         >
-          <motion.div className="card-peek-clip" style={{ height: peekReveal }}>
+          <motion.div
+            className="card-tilt"
+            style={{ width: '100%', y: peekBobY }}
+          >
             <div
               ref={peekFootprintRef}
               className="card-footprint card-footprint--peek"
