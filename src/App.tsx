@@ -13,7 +13,15 @@ export default function App() {
       <div className="app-frame">
         <div className="app-grid">
           <div className="cell cell-face">
-            <img src={faceUrl} alt="" className="face-icon" />
+            <a
+              href="https://app.notion.com/p/arslanhasan/1e18f8ed024980a98a0ecea2da666b41?v=1e18f8ed02498190a750000c9b4c249b&source=copy_link"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open Notion"
+              className="face-link"
+            >
+              <img src={faceUrl} alt="" className="face-icon" />
+            </a>
           </div>
 
           <header className="cell cell-brand">

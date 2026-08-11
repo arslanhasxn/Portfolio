@@ -81,6 +81,12 @@ a {
   justify-self: end;
 }
 
+.face-link {
+  display: block;
+  line-height: 0;
+  cursor: pointer;
+}
+
 .face-icon {
   display: block;
   width: auto;
@@ -88,7 +94,6 @@ a {
   max-width: 5.5rem;
   max-height: 100%;
   object-fit: contain;
-  pointer-events: none;
   user-select: none;
 }
 
