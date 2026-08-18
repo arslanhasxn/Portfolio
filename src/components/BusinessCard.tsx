@@ -651,8 +651,8 @@ export function BusinessCard() {
     const onDown = (e: PointerEvent) => {
       if (pullKind.current) return
       const target = e.target as Element | null
-      // Keep project links + face tappable; everything else below the text can pull up
-      if (target?.closest('a.project-link, a.face-link, .face-link')) return
+      // Keep links + face tappable; everything else below the text can pull up
+      if (target?.closest('a, .face-link')) return
       if (e.clientY < openSwipeMinY()) return
       tracking = true
       startX = e.clientX

@@ -1,3 +1,11 @@
+@font-face {
+  font-family: 'PF Pixelscript Pro';
+  src: url('./assets/fonts/PFPixelscriptPro-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg: #121212;
   --fg: #f4f4f2;
@@ -5,6 +13,7 @@
   --label: rgb(244 244 242 / 50%);
   --frame-width: 24.375rem;
   --font: 'Geist Mono', ui-monospace, monospace;
+  --at-font: 'PF Pixelscript Pro', var(--font);
   --text-size: 14px;
   --text-leading: 17px;
   --text-tracking: 0.5px;
@@ -82,36 +91,41 @@ a {
   grid-template-rows: repeat(3, 1fr);
 }
 
-/* Row 1, Col 3 — face */
-.cell-face {
-  grid-column: 3;
+/* Row 1 — provided 3-face strip, one head per column */
+.cell-faces {
+  grid-column: 1 / -1;
   grid-row: 1;
   align-self: start;
-  justify-self: end;
-}
-
-.face-link {
-  display: block;
+  min-height: 0;
+  text-decoration: none;
   line-height: 0;
-  cursor: pointer;
 }
 
 .face-icon {
   display: block;
-  width: auto;
+  width: 100%;
   height: auto;
-  max-width: 5.5rem;
-  max-height: 100%;
   object-fit: contain;
   user-select: none;
+  pointer-events: none;
 }
 
-/* Row 2, Col 1 — name */
+/* Row 2 — name + socials */
 .cell-brand {
-  grid-column: 1;
+  grid-column: 1 / -1;
   grid-row: 2;
   align-self: start;
   justify-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+  min-width: 0;
+}
+
+.socials {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 /* Row 3 — links (col 1) + arrows (col 3) via nested 3-col grid */
@@ -184,4 +198,50 @@ a {
 .project-link:focus-visible {
   text-decoration: underline;
   text-underline-offset: 0.25em;
+}
+
+.social-link {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  text-decoration: none;
+  text-transform: uppercase;
+  font-family: var(--font);
+  font-size: var(--text-size);
+  font-weight: var(--text-weight);
+  line-height: var(--text-leading);
+  letter-spacing: var(--text-tracking);
+  color: var(--muted);
+  white-space: nowrap;
+  transition: opacity 160ms ease;
+}
+
+.social-link:hover,
+.social-link:focus-visible {
+  opacity: 0.7;
+  outline: none;
+}
+
+.social-link:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+
+.email-domain {
+  color: var(--label);
+}
+
+.at-mark {
+  font-family: var(--at-font);
+  font-weight: 400;
+  font-style: normal;
+  letter-spacing: 0;
+  font-size: 0.5rem;
+  line-height: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  a[href] {
+    cursor: crosshair;
+  }
 }
