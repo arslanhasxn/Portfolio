@@ -705,26 +705,31 @@ export function BusinessCard() {
     finishOpenScrub,
   ])
 
-  // Focused: anywhere above the card (full width) → swipe down to dock
+  // Focused: empty space above or below the card (full width) → swipe down to dock
   useEffect(() => {
     if (!focused || reduceMotion) return
 
     let tracking = false
     let startX = 0
     let startY = 0
+    let startedBelow = false
 
-    const cardTop = () =>
-      focusFootprintRef.current?.getBoundingClientRect().top ?? Infinity
+    const cardRect = () => focusFootprintRef.current?.getBoundingClientRect()
 
     const onDown = (e: PointerEvent) => {
       if (pullKind.current) return
       if (phaseRef.current !== 'ready' || flippingRef.current) return
       const target = e.target as Element | null
       if (target?.closest('a, .face-link')) return
-      // Full-width band above the *visual* card top (even if hit padding covers it)
-      if (e.clientY >= cardTop()) return
+      const rect = cardRect()
+      const top = rect?.top ?? Infinity
+      const bottom = rect?.bottom ?? -Infinity
+      const above = e.clientY < top
+      const below = e.clientY > bottom
+      if (!above && !below) return
 
       tracking = true
+      startedBelow = below
       startX = e.clientX
       startY = e.clientY
     }
@@ -744,7 +749,7 @@ export function BusinessCard() {
           x: startX,
           y: startY,
           ox: 0.5,
-          oy: -0.35,
+          oy: startedBelow ? 1.35 : -0.35,
           t: performance.now(),
         }
         pressing.current = true
@@ -948,7 +953,14 @@ export function BusinessCard() {
       // Top of card (and padding above): prefer dock even with mild diagonal
       const fromTop = oy < 0.45
       const fromDockZone = oy < DOCK_START_OY_MAX
-      if (dy > 0 && ((fromTop && dy > Math.abs(dx) * 0.75) || (vertical && fromDockZone))) {
+      // Empty space / hit padding below the visual card → dock, not flip
+      const fromBelow = oy > 1
+      if (
+        dy > 0 &&
+        ((fromTop && dy > Math.abs(dx) * 0.75) ||
+          (vertical && fromDockZone) ||
+          (vertical && fromBelow))
+      ) {
         axisLock.current = 'v'
         beginCloseScrub()
         updateCloseScrub(e.clientY)
@@ -1115,11 +1127,12 @@ export function BusinessCard() {
             if (pullKind.current) return
             const card = focusFootprintRef.current?.getBoundingClientRect()
             const aboveCard = !!card && e.clientY < card.top
+            const belowCard = !!card && e.clientY > card.bottom
             pointerStart.current = {
               x: e.clientX,
               y: e.clientY,
               ox: 0.5,
-              oy: aboveCard ? -0.35 : 0.5,
+              oy: aboveCard ? -0.35 : belowCard ? 1.35 : 0.5,
               t: performance.now(),
             }
             pressing.current = true
@@ -1134,8 +1147,10 @@ export function BusinessCard() {
               return
             }
             if (phaseRef.current !== 'ready') return
-            // Only pull-to-dock when the gesture began above the card
-            if (pointerStart.current.oy >= 0) return
+            // Pull-to-dock when the gesture began in empty space above or below the card
+            const offCard =
+              pointerStart.current.oy < 0 || pointerStart.current.oy > 1
+            if (!offCard) return
             const dx = e.clientX - pointerStart.current.x
             const dy = e.clientY - pointerStart.current.y
             if (dy > AXIS_LOCK && Math.abs(dy) > Math.abs(dx) * 0.85) {
