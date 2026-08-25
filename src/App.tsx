@@ -4,6 +4,7 @@ import facesUrl from './assets/faces.png'
 
 const SOCIALS = [
   { label: 'BEHANCE', href: 'https://www.behance.net/arslanhasan' },
+  { label: 'GITHUB', href: 'https://github.com/arslanhasxn' },
   { label: 'TWITTER', href: 'https://x.com/arslanhasxn' },
   { label: 'LINKEDIN', href: 'https://www.linkedin.com/in/arslanhasxn/' },
 ] as const
