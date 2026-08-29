@@ -121,7 +121,6 @@
   justify-content: center;
   transform-style: preserve-3d;
   transform-origin: center center;
-  will-change: transform;
 }
 
 .card-footprint {
@@ -146,16 +145,38 @@
 
 .card-stage.is-live {
   overflow: visible;
-  perspective: 1600px;
-  perspective-origin: 50% 50%;
+  perspective: 2600px;
+  perspective-origin: 50% 45%;
 }
 
-.card-flip {
+.card-flip,
+.card-yaw,
+.card-pitch {
   position: absolute;
   inset: 0;
   transform-style: preserve-3d;
   transform-origin: center center;
   will-change: transform;
+}
+
+.card-pitch {
+  transform-origin: center center;
+}
+
+.card-body {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  --card-depth: 2px;
+  --card-surface: #ececec;
+}
+
+.card-body .card-face--front {
+  transform: translateZ(calc(var(--card-depth) / 2));
+}
+
+.card-body .card-face--back {
+  transform: rotateY(180deg) translateZ(calc(var(--card-depth) / 2));
 }
 
 .card-face {
@@ -166,10 +187,15 @@
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   overflow: hidden;
-  background: #ececec;
+  background: var(--card-surface, #ececec);
   transform-origin: center center;
-  box-shadow: 0 12px 36px rgb(0 0 0 / 40%);
   transition: box-shadow 0.35s ease;
+}
+
+.card-stage.is-live .card-face {
+  box-shadow:
+    0 10px 28px rgb(0 0 0 / 22%),
+    inset 0 0 0 1px rgb(0 0 0 / 6%);
 }
 
 .card-footprint.is-flying .card-face {
@@ -197,8 +223,7 @@
 }
 
 .card-face--back {
-  background: #111;
-  transform: rotateY(180deg);
+  background: var(--card-surface, #ececec);
 }
 
 .card-face--peek-back {

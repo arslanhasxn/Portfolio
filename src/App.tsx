@@ -1,5 +1,6 @@
 import { ArrowIcon } from './components/ArrowIcon'
 import { BusinessCard } from './components/BusinessCard'
+import { ProfileName } from './components/ProfileName'
 import facesUrl from './assets/faces.png'
 
 const SOCIALS = [
@@ -33,7 +34,7 @@ export default function App() {
           </a>
 
           <header className="cell cell-brand">
-            <h1 className="brand">ARSLAN HASAN</h1>
+            <ProfileName />
             <nav className="socials" aria-label="Social">
               {SOCIALS.map((social) => (
                 <a
