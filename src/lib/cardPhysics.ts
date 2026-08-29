@@ -9,18 +9,16 @@ export const CARD_PHYSICS = {
   flickY: 280,
 } as const
 
-export const flipSnapSpring = {
-  type: 'spring' as const,
-  stiffness: 400,
-  damping: 36,
-  mass: 0.88,
+export const flipSnapTween = {
+  type: 'tween' as const,
+  duration: 0.38,
+  ease: [0.65, 0, 0.35, 1] as const,
 }
 
-export const pitchSnapSpring = {
-  type: 'spring' as const,
-  stiffness: 520,
-  damping: 34,
-  mass: 0.7,
+export const pitchSnapTween = {
+  type: 'tween' as const,
+  duration: 0.28,
+  ease: [0.22, 1, 0.36, 1] as const,
 }
 
 export function normalizeYaw(deg: number) {
@@ -53,4 +51,41 @@ export function resolveSnapYaw(current: number, velocityX: number): 0 | 180 {
   }
 
   return toBack ? 180 : 0
+}
+
+/** Which face is currently showing from an arbitrary yaw angle */
+export function nearestSettledYaw(current: number): 0 | 180 {
+  const norm = normalizeYaw(current)
+  return norm > 90 && norm < 270 ? 180 : 0
+}
+
+/**
+ * Shortest arc on the yaw circle (e.g. 350° → 0° is +10°, not −350°).
+ */
+export function shortestYawDelta(current: number, target: 0 | 180): number {
+  return ((target - current + 540) % 360) - 180
+}
+
+/**
+ * Pick an equivalent yaw (±360°) closest to `current` for continuity while dragging.
+ */
+export function continuityYaw(current: number, next: number): number {
+  let best = next
+  let bestDist = Infinity
+  for (let k = -2; k <= 2; k++) {
+    const candidate = next + k * 360
+    const dist = Math.abs(candidate - current)
+    if (dist < bestDist) {
+      bestDist = dist
+      best = candidate
+    }
+  }
+  return best
+}
+
+/**
+ * @deprecated Use shortestYawDelta — kept for any external refs
+ */
+export function snapStartYaw(current: number, target: 0 | 180): number {
+  return current + shortestYawDelta(current, target)
 }

@@ -9,7 +9,6 @@ import {
 import {
   animate,
   motion,
-  useMotionTemplate,
   useMotionValue,
   useReducedMotion,
   useTransform,
@@ -17,11 +16,14 @@ import {
 import cardFront from '../assets/card-front.png'
 import { useFocusedCardGestures } from '../hooks/useFocusedCardGestures'
 import {
-  flipSnapSpring,
+  continuityYaw,
+  flipSnapTween,
+  nearestSettledYaw,
   pitchSensitivity,
-  pitchSnapSpring,
+  pitchSnapTween,
   resolveSnapYaw,
   rubberbandPitch,
+  shortestYawDelta,
   yawSensitivity,
 } from '../lib/cardPhysics'
 import './BusinessCard.css'
@@ -33,6 +35,7 @@ const PEEK_PX = 28
 const PEEK_HOVER_EXTRA = 14
 const AXIS_LOCK = 10
 const PULL_COMMIT = 0.28
+const PULL_COMMIT_CLOSE = 0.2
 const PULL_VELOCITY = 650
 
 const BACK_RATIO = 579 / 1024
@@ -152,6 +155,9 @@ export function BusinessCard() {
   const axisLock = useRef<'h' | 'v' | null>(null)
   const pullKind = useRef<'open' | 'close' | null>(null)
   const dockPose = useRef<DockPose | null>(null)
+  const closeScrubStart = useRef<{ x: number; y: number; t: number } | null>(
+    null,
+  )
   const timers = useRef<number[]>([])
   const pressing = useRef(false)
   const flyAnimRef = useRef<{ stop: () => void } | null>(null)
@@ -161,8 +167,6 @@ export function BusinessCard() {
 
   const flipDragBaseY = useRef(0)
   const flipDragBaseX = useRef(0)
-  const grabOx = useRef(0.5)
-  const grabOy = useRef(0.5)
   const cardSize = useRef({ w: 320, h: 200 })
   const flipDragging = useRef(false)
   const flippedRef = useRef(flipped)
@@ -170,11 +174,7 @@ export function BusinessCard() {
 
   const flipY = useMotionValue(0)
   const flipX = useMotionValue(0)
-  const flipOriginX = useMotionValue(50)
-  const flipOriginY = useMotionValue(50)
   const flipAnimRef = useRef<{ stop: () => void } | null>(null)
-  const flipTransform = useMotionTemplate`rotateX(${flipX}deg) rotateY(${flipY}deg)`
-  const flipOrigin = useMotionTemplate`${flipOriginX}% ${flipOriginY}%`
 
   const flyX = useMotionValue(0)
   const flyY = useMotionValue(0)
@@ -204,11 +204,6 @@ export function BusinessCard() {
     timers.current.forEach((t) => window.clearTimeout(t))
     timers.current = []
   }
-
-  const resetFlipOrigin = useCallback(() => {
-    flipOriginX.set(50)
-    flipOriginY.set(50)
-  }, [flipOriginX, flipOriginY])
 
   useEffect(() => {
     return () => {
@@ -272,13 +267,13 @@ export function BusinessCard() {
     backdropOp.set(0)
     flipY.set(0)
     flipX.set(0)
-    resetFlipOrigin()
     setPeekHover(false)
     peekBobY.set(0)
     setMode('peek')
     setPhase('ready')
     pullKind.current = null
     dockPose.current = null
+    closeScrubStart.current = null
   }, [
     backdropOp,
     flyX,
@@ -288,7 +283,6 @@ export function BusinessCard() {
     cardW,
     cardRatio,
     peekBobY,
-    resetFlipOrigin,
   ])
 
   const measureDockPose = useCallback((): DockPose => {
@@ -421,7 +415,6 @@ export function BusinessCard() {
     flipAnimRef.current?.stop()
     flipAnimRef.current = null
     setPeekHover(false)
-    resetFlipOrigin()
 
     if (reduceMotion) {
       finishClose()
@@ -437,7 +430,6 @@ export function BusinessCard() {
     closing,
     scrubbing,
     reduceMotion,
-    resetFlipOrigin,
     finishClose,
     measureDockPose,
     animateToPose,
@@ -457,8 +449,10 @@ export function BusinessCard() {
       flipAnimRef.current?.stop()
       flipAnimRef.current = null
 
-      const targetY = resolveSnapYaw(flipY.get(), velocityX)
+      const current = flipY.get()
+      const targetY = resolveSnapYaw(current, velocityX)
       const toBack = targetY === 180
+      const yawDelta = shortestYawDelta(current, targetY)
 
       if (reduceMotion) {
         flipY.set(targetY)
@@ -466,30 +460,34 @@ export function BusinessCard() {
         flippedRef.current = toBack
         setFlipped(toBack)
         flipDragging.current = false
-        resetFlipOrigin()
         return
       }
 
-      const yAnim = animate(flipY, targetY, flipSnapSpring)
-      const xAnim = animate(flipX, 0, pitchSnapSpring)
+      const yAnim =
+        Math.abs(yawDelta) < 0.5
+          ? null
+          : animate(flipY, current + yawDelta, flipSnapTween)
+      const xAnim =
+        Math.abs(flipX.get()) < 0.5
+          ? null
+          : animate(flipX, 0, pitchSnapTween)
 
       flipAnimRef.current = {
         stop: () => {
-          yAnim.stop()
-          xAnim.stop()
+          yAnim?.stop()
+          xAnim?.stop()
         },
       }
 
-      await Promise.all([yAnim, xAnim])
+      await Promise.all([yAnim, xAnim].filter(Boolean))
       flipAnimRef.current = null
       flipY.set(targetY)
       flipX.set(0)
       flippedRef.current = toBack
       setFlipped(toBack)
       flipDragging.current = false
-      resetFlipOrigin()
     },
-    [reduceMotion, resetFlipOrigin, flipY, flipX],
+    [reduceMotion, flipY, flipX],
   )
 
   const updateOpenScrub = useCallback(
@@ -505,14 +503,84 @@ export function BusinessCard() {
 
   const updateCloseScrub = useCallback(
     (clientY: number) => {
-      const start = pointerStart.current
+      const start = closeScrubStart.current
       const pose = dockPose.current
       if (!start || !pose) return
-      const travel = Math.max(120, Math.abs(pose.y) * 0.85)
+      const travel = Math.max(96, Math.abs(pose.y) * 0.72)
       applyPose(pose, clamp01(1 - (clientY - start.y) / travel))
     },
     [applyPose],
   )
+
+  const finishCloseScrub = useCallback(
+    (clientY: number) => {
+      if (pullKind.current !== 'close') return
+
+      pullKind.current = null
+      const start = closeScrubStart.current
+      closeScrubStart.current = null
+      const pose = dockPose.current
+
+      if (!start || !pose) {
+        setPhase('ready')
+        phaseRef.current = 'ready'
+        return
+      }
+
+      const dt = Math.max(1, performance.now() - start.t)
+      const dy = clientY - start.y
+      const velocity = (dy / dt) * 1000
+      const t = backdropOp.get()
+      const commit = t <= 1 - PULL_COMMIT_CLOSE || velocity > PULL_VELOCITY
+
+      if (commit) {
+        setPhase('closing')
+        phaseRef.current = 'closing'
+        void animateToPose(pose, 0, finishClose)
+      } else {
+        setPhase('opening')
+        phaseRef.current = 'opening'
+        void animateToPose(pose, 1, () => {
+          setPhase('ready')
+          phaseRef.current = 'ready'
+        })
+      }
+    },
+    [animateToPose, backdropOp, finishClose],
+  )
+
+  const beginCloseScrub = useCallback((): boolean => {
+    if (pullKind.current === 'open') return false
+    if (pullKind.current === 'close') return true
+
+    if (phaseRef.current === 'scrubbing' && !pullKind.current) {
+      setPhase('ready')
+      phaseRef.current = 'ready'
+    }
+
+    if (phaseRef.current !== 'ready') return false
+
+    flyAnimRef.current?.stop()
+    flipAnimRef.current?.stop()
+    flipDragging.current = false
+    flipX.set(0)
+
+    const pose = measureDockPose()
+    dockPose.current = pose
+    pullKind.current = 'close'
+    didPull.current = true
+
+    const press = pointerStart.current
+    closeScrubStart.current = {
+      x: press?.x ?? 0,
+      y: press?.y ?? 0,
+      t: performance.now(),
+    }
+
+    setPhase('scrubbing')
+    phaseRef.current = 'scrubbing'
+    return true
+  }, [measureDockPose, flipX])
 
   const finishOpenScrub = useCallback(
     (clientY: number) => {
@@ -533,43 +601,15 @@ export function BusinessCard() {
 
       if (commit) {
         setPhase('opening')
+        phaseRef.current = 'opening'
         void animateToPose(pose, 1, () => {
           setPhase('ready')
+          phaseRef.current = 'ready'
         })
       } else {
         setPhase('closing')
+        phaseRef.current = 'closing'
         void animateToPose(pose, 0, finishClose)
-      }
-    },
-    [animateToPose, backdropOp, finishClose],
-  )
-
-  const finishCloseScrub = useCallback(
-    (clientY: number) => {
-      // Idempotent — card pointerup and window listener may both fire
-      if (pullKind.current !== 'close') return
-      pullKind.current = null
-
-      const start = pointerStart.current
-      const pose = dockPose.current
-      if (!pose) {
-        setPhase('ready')
-        return
-      }
-      const dt = Math.max(1, performance.now() - (start?.t ?? performance.now()))
-      const dy = clientY - (start?.y ?? clientY)
-      const velocity = (dy / dt) * 1000
-      const t = backdropOp.get()
-      const commit = t <= 1 - PULL_COMMIT || velocity > PULL_VELOCITY
-
-      if (commit) {
-        setPhase('closing')
-        void animateToPose(pose, 0, finishClose)
-      } else {
-        setPhase('opening')
-        void animateToPose(pose, 1, () => {
-          setPhase('ready')
-        })
       }
     },
     [animateToPose, backdropOp, finishClose],
@@ -578,6 +618,7 @@ export function BusinessCard() {
   const beginOpenScrub = useCallback(
     (clientX: number, clientY: number) => {
       if (mode === 'focus' || pullKind.current === 'open') return
+      setPeekHover(false)
       const pose = measureDockPose()
       dockPose.current = pose
       pullKind.current = 'open'
@@ -585,9 +626,9 @@ export function BusinessCard() {
       flipY.set(0)
       cardRatio.set(pose.ratio)
       applyPose(pose, 0)
-      setPeekHover(false)
       setHasOpenedOnce(true)
       setPhase('scrubbing')
+      phaseRef.current = 'scrubbing'
       setMode('focus')
       pointerStart.current = {
         x: clientX,
@@ -599,17 +640,6 @@ export function BusinessCard() {
     },
     [mode, measureDockPose, applyPose, flipY, cardRatio],
   )
-
-  const beginCloseScrub = useCallback(() => {
-    if (pullKind.current) return
-    if (phaseRef.current !== 'ready' || flipDragging.current) return
-    const pose = measureDockPose()
-    dockPose.current = pose
-    pullKind.current = 'close'
-    didPull.current = true
-    flipAnimRef.current?.stop()
-    setPhase('scrubbing')
-  }, [measureDockPose])
 
   // Just below COMPONENT LIBRARY → swipe up to pull open (full width)
   useEffect(() => {
@@ -795,17 +825,19 @@ export function BusinessCard() {
 
   const openFromPeek = useCallback(() => {
     clearTimers()
+    setPeekHover(false)
     const pose = measureDockPose()
     dockPose.current = pose
     cardRatio.set(pose.ratio)
     applyPose(pose, 0)
-    setPeekHover(false)
     flipY.set(0)
     setHasOpenedOnce(true)
     setPhase('opening')
+    phaseRef.current = 'opening'
     setMode('focus')
     void animateToPose(pose, 1, () => {
       setPhase('ready')
+      phaseRef.current = 'ready'
     })
   }, [measureDockPose, applyPose, flipY, cardRatio, animateToPose])
 
@@ -867,7 +899,7 @@ export function BusinessCard() {
     pointerStart.current = null
   }
 
-  const runFlip = async (ox: number, oy: number) => {
+  const runFlip = async () => {
     const goingToBack = !flippedRef.current
 
     if (reduceMotion) {
@@ -875,47 +907,47 @@ export function BusinessCard() {
       setFlipped(goingToBack)
       flipY.set(goingToBack ? 180 : 0)
       flipX.set(0)
-      resetFlipOrigin()
       return
     }
 
     flipAnimRef.current?.stop()
     flipAnimRef.current = null
-    flipOriginX.set(ox * 100)
-    flipOriginY.set(oy * 100)
     flipX.set(0)
 
-    const startY = flipY.get()
     const endY = goingToBack ? 180 : 0
+    const current = flipY.get()
+    const yawDelta = shortestYawDelta(current, endY)
     let swapped = false
 
-    const yAnim = animate(flipY, endY, {
-      ...flipTween,
-      onUpdate: (latest) => {
-        const span = endY - startY
-        if (span === 0) return
-        const t = (latest - startY) / span
-        if (!swapped && t >= 0.5) {
-          swapped = true
-          flippedRef.current = goingToBack
-          setFlipped(goingToBack)
-        }
-      },
-    })
+    const yAnim =
+      Math.abs(yawDelta) < 0.5
+        ? null
+        : animate(flipY, current + yawDelta, {
+            ...flipTween,
+            onUpdate: (latest) => {
+              const span = yawDelta
+              if (span === 0) return
+              const t = (latest - current) / span
+              if (!swapped && t >= 0.5) {
+                swapped = true
+                flippedRef.current = goingToBack
+                setFlipped(goingToBack)
+              }
+            },
+          })
 
     flipAnimRef.current = {
       stop: () => {
-        yAnim.stop()
+        yAnim?.stop()
       },
     }
 
-    await yAnim
+    if (yAnim) await yAnim
     flipAnimRef.current = null
     flipY.set(endY)
     flipX.set(0)
     flippedRef.current = goingToBack
     setFlipped(goingToBack)
-    resetFlipOrigin()
   }
 
   useFocusedCardGestures({
@@ -927,14 +959,14 @@ export function BusinessCard() {
       didMove.current = false
       didDragFlip.current = false
       didPull.current = false
-      grabOx.current = coords.ox
-      grabOy.current = coords.oy
       pointerStart.current = { ...coords, t: performance.now() }
     },
     onPressEnd: () => {
       pressing.current = false
-      flipDragging.current = false
-      pointerStart.current = null
+      if (pullKind.current !== 'close') {
+        flipDragging.current = false
+        pointerStart.current = null
+      }
     },
     onRotateStart: () => {
       const rect = focusFootprintRef.current?.getBoundingClientRect()
@@ -942,10 +974,16 @@ export function BusinessCard() {
         w: rect?.width ?? 320,
         h: rect?.height ?? 200,
       }
-      flipDragBaseY.current = flipY.get()
+      const nearest = nearestSettledYaw(flipY.get())
+      const normalized = continuityYaw(flipY.get(), nearest)
+      flipY.set(normalized)
+      const showingBack = nearest === 180
+      if (flippedRef.current !== showingBack) {
+        flippedRef.current = showingBack
+        setFlipped(showingBack)
+      }
+      flipDragBaseY.current = normalized
       flipDragBaseX.current = flipX.get()
-      flipOriginX.set(grabOx.current * 100)
-      flipOriginY.set(grabOy.current * 100)
       flipDragging.current = true
       flipAnimRef.current?.stop()
       didDragFlip.current = true
@@ -956,7 +994,8 @@ export function BusinessCard() {
         flipDragBaseX.current - my * pitchSensitivity(h),
       )
       flipX.set(pitch)
-      flipY.set(flipDragBaseY.current + mx * yawSensitivity(w))
+      const raw = flipDragBaseY.current + mx * yawSensitivity(w)
+      flipY.set(continuityYaw(flipY.get(), raw))
       didMove.current = true
     },
     onRotateEnd: (velocityX) => {
@@ -969,6 +1008,8 @@ export function BusinessCard() {
     onDockMove: updateCloseScrub,
     onDockEnd: (clientY) => {
       finishCloseScrub(clientY)
+      pressing.current = false
+      flipDragging.current = false
       pointerStart.current = null
     },
   })
@@ -984,16 +1025,7 @@ export function BusinessCard() {
     )
       return
 
-    const el = cardRef.current
-    let ox = 0.5
-    let oy = 0.5
-    if (el) {
-      const rect = el.getBoundingClientRect()
-      ox = (e.clientX - rect.left) / Math.max(rect.width, 1)
-      oy = (e.clientY - rect.top) / Math.max(rect.height, 1)
-    }
-
-    void runFlip(ox, oy)
+    void runFlip()
   }
 
   const flying = opening || closing || scrubbing
@@ -1168,14 +1200,9 @@ export function BusinessCard() {
                   }}
                 >
                   <div className="card-stage is-live">
-                    <motion.div
-                      className="card-flip"
-                      style={{
-                        transform: flipTransform,
-                        transformOrigin: flipOrigin,
-                      }}
-                    >
-                      <div className="card-body">
+                    <motion.div className="card-yaw" style={{ rotateY: flipY }}>
+                      <motion.div className="card-pitch" style={{ rotateX: flipX }}>
+                        <div className="card-body">
                         <div className="card-face card-face--front">
                           <img src={cardFront} alt="" draggable={false} />
                           {!flipped && !reduceMotion && (
@@ -1189,18 +1216,8 @@ export function BusinessCard() {
                         <div className="card-face card-face--back">
                           <img src={cardFront} alt="" draggable={false} />
                         </div>
-
-                        <div className="card-edge card-edge--top" aria-hidden />
-                        <div
-                          className="card-edge card-edge--bottom"
-                          aria-hidden
-                        />
-                        <div className="card-edge card-edge--left" aria-hidden />
-                        <div
-                          className="card-edge card-edge--right"
-                          aria-hidden
-                        />
-                      </div>
+                        </div>
+                      </motion.div>
                     </motion.div>
                   </div>
                 </motion.div>

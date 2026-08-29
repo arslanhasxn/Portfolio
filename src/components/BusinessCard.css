@@ -149,7 +149,9 @@
   perspective-origin: 50% 45%;
 }
 
-.card-flip {
+.card-flip,
+.card-yaw,
+.card-pitch {
   position: absolute;
   inset: 0;
   transform-style: preserve-3d;
@@ -157,76 +159,24 @@
   will-change: transform;
 }
 
+.card-pitch {
+  transform-origin: center center;
+}
+
 .card-body {
   position: absolute;
   inset: 0;
   transform-style: preserve-3d;
-  --card-depth: clamp(5px, 0.65vw, 8px);
+  --card-depth: 2px;
+  --card-surface: #ececec;
 }
 
 .card-body .card-face--front {
   transform: translateZ(calc(var(--card-depth) / 2));
-  box-shadow:
-    0 10px 28px rgb(0 0 0 / 34%),
-    0 2px 0 rgb(255 255 255 / 8%) inset;
 }
 
 .card-body .card-face--back {
   transform: rotateY(180deg) translateZ(calc(var(--card-depth) / 2));
-  box-shadow:
-    0 10px 28px rgb(0 0 0 / 34%),
-    0 2px 0 rgb(255 255 255 / 5%) inset;
-}
-
-.card-edge {
-  position: absolute;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  pointer-events: none;
-  background: linear-gradient(
-    180deg,
-    #3a3a3a 0%,
-    #1c1c1c 42%,
-    #111 100%
-  );
-}
-
-.card-edge--top,
-.card-edge--bottom {
-  left: 0;
-  width: 100%;
-  height: var(--card-depth);
-}
-
-.card-edge--top {
-  top: 0;
-  transform-origin: top center;
-  transform: rotateX(90deg) translateZ(calc(var(--card-depth) / 2));
-}
-
-.card-edge--bottom {
-  bottom: 0;
-  transform-origin: bottom center;
-  transform: rotateX(-90deg) translateZ(calc(var(--card-depth) / 2));
-}
-
-.card-edge--left,
-.card-edge--right {
-  top: 0;
-  height: 100%;
-  width: var(--card-depth);
-}
-
-.card-edge--left {
-  left: 0;
-  transform-origin: left center;
-  transform: rotateY(-90deg) translateZ(calc(var(--card-depth) / 2));
-}
-
-.card-edge--right {
-  right: 0;
-  transform-origin: right center;
-  transform: rotateY(90deg) translateZ(calc(var(--card-depth) / 2));
 }
 
 .card-face {
@@ -237,10 +187,15 @@
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   overflow: hidden;
-  background: #ececec;
+  background: var(--card-surface, #ececec);
   transform-origin: center center;
-  box-shadow: 0 12px 36px rgb(0 0 0 / 40%);
   transition: box-shadow 0.35s ease;
+}
+
+.card-stage.is-live .card-face {
+  box-shadow:
+    0 10px 28px rgb(0 0 0 / 22%),
+    inset 0 0 0 1px rgb(0 0 0 / 6%);
 }
 
 .card-footprint.is-flying .card-face {
@@ -268,7 +223,7 @@
 }
 
 .card-face--back {
-  background: #111;
+  background: var(--card-surface, #ececec);
 }
 
 .card-face--peek-back {

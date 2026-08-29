@@ -3,9 +3,21 @@ import { useMemo, useRef, type RefObject } from 'react'
 
 export type CardGestureMode = 'none' | 'rotate' | 'dock'
 
-/** Only the top band + hit padding above triggers pull-to-dock */
-const DOCK_ZONE_OY_MAX = 0.2
-const DOCK_MIN_PULL = 14
+/** Top portion of the card where swipe-down docks instead of rotating */
+const DOCK_ZONE_OY_MAX = 0.35
+const DOCK_MIN_PULL = 10
+
+function isTopDockZone(oy: number) {
+  return oy < DOCK_ZONE_OY_MAX || oy < 0
+}
+
+function wantsDockDown(mx: number, my: number, oy: number) {
+  return (
+    isTopDockZone(oy) &&
+    my > DOCK_MIN_PULL &&
+    my > Math.abs(mx) * 0.85
+  )
+}
 
 type Options = {
   enabled: boolean
@@ -27,7 +39,7 @@ type Options = {
 }
 
 /**
- * Focused card: free 2-axis 3D rotation. Pull-down from the top edge docks.
+ * Focused card: free 2-axis 3D rotation. Swipe-down from the top docks.
  */
 export function useFocusedCardGestures({
   enabled,
@@ -87,17 +99,15 @@ export function useFocusedCardGestures({
         const oy = startOy.current
 
         if (mode.current === 'none') {
-          const fromTopBand = oy < DOCK_ZONE_OY_MAX
-          const fromAbove = oy < 0
-          const wantsDock =
-            my > DOCK_MIN_PULL &&
-            my > Math.abs(mx) * 1.15 &&
-            (fromTopBand || fromAbove)
-
-          if (wantsDock) {
+          if (wantsDockDown(mx, my, oy)) {
             mode.current = 'dock'
             onDockStart()
             onDockMove(clientY)
+            return
+          }
+
+          // Pulling down from the top edge — wait for dock, don't lock rotate yet
+          if (isTopDockZone(oy) && my > 0 && my >= Math.abs(mx) * 0.7) {
             return
           }
 
@@ -110,6 +120,12 @@ export function useFocusedCardGestures({
         if (mode.current === 'dock') {
           onDockMove(clientY)
         } else if (mode.current === 'rotate') {
+          if (wantsDockDown(mx, my, oy)) {
+            mode.current = 'dock'
+            onDockStart()
+            onDockMove(clientY)
+            return
+          }
           onRotateDrag(mx, my)
         }
       },
