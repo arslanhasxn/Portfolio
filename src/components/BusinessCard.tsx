@@ -13,6 +13,7 @@ import {
   useReducedMotion,
   useTransform,
 } from 'motion/react'
+import cardBack from '../assets/card-back.png'
 import cardFront from '../assets/card-front.png'
 import { useFocusedCardGestures } from '../hooks/useFocusedCardGestures'
 import {
@@ -1154,7 +1155,9 @@ export function BusinessCard() {
             >
               <div className="card-stage">
                 <div className="card-flip">
-                  <div className="card-face card-face--front card-face--docked">
+                  <div
+                    className="card-face card-face--front card-face--docked grain-gradient grain-gradient--card-front"
+                  >
                     <img src={cardFront} alt="" draggable={false} />
                     {!reduceMotion && (
                       <span className="card-wave" aria-hidden="true" />
@@ -1203,7 +1206,9 @@ export function BusinessCard() {
                     <motion.div className="card-yaw" style={{ rotateY: flipY }}>
                       <motion.div className="card-pitch" style={{ rotateX: flipX }}>
                         <div className="card-body">
-                        <div className="card-face card-face--front">
+                        <div
+                          className="card-face card-face--front grain-gradient grain-gradient--card-front"
+                        >
                           <img src={cardFront} alt="" draggable={false} />
                           {!flipped && !reduceMotion && (
                             <span
@@ -1213,8 +1218,10 @@ export function BusinessCard() {
                           )}
                         </div>
 
-                        <div className="card-face card-face--back">
-                          <img src={cardFront} alt="" draggable={false} />
+                        <div
+                          className="card-face card-face--back grain-gradient grain-gradient--card-back"
+                        >
+                          <img src={cardBack} alt="" draggable={false} />
                         </div>
                         </div>
                       </motion.div>

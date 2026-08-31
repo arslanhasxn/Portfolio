@@ -1,0 +1,101 @@
+/*
+ * Grainy gradient — reusable texture layer for any surface.
+ *
+ * Stack (bottom → top):
+ *   ::before  — CSS gradient (--grain-gradient-bg)
+ *   children  — content (images, text) at z-index 1
+ *   ::after   — tiled SVG noise (--grain-noise) blended into layers below
+ *
+ * Tuning knobs (set on the element or a variant class):
+ *   --grain-gradient-bg   linear/radial gradient
+ *   --grain-opacity       0.05–0.15 typical (subtle film grain)
+ *   --grain-blend-mode    overlay | soft-light (soft-light is gentler)
+ *   --grain-noise-size    tile size; larger = coarser apparent grain
+ *
+ * SVG source (src/assets/grain-noise.svg):
+ *   baseFrequency 0.6–0.9 → grain scale (higher = finer specks)
+ *   numOctaves 2–4        → detail / organic complexity
+ *   feColorMatrix in SVG  → desaturate noise to grayscale grain
+ */
+
+:root {
+  --grain-opacity: 0.1;
+  --grain-blend-mode: overlay;
+  --grain-noise-size: 256px;
+  --grain-gradient-bg: linear-gradient(145deg, #ececec 0%, #d8d8d6 100%);
+}
+
+.grain-gradient {
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+}
+
+.grain-gradient::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--grain-gradient-bg);
+  pointer-events: none;
+}
+
+.grain-gradient::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  opacity: var(--grain-opacity);
+  mix-blend-mode: var(--grain-blend-mode);
+  background-image: url('../assets/grain-noise.svg');
+  background-repeat: repeat;
+  background-size: var(--grain-noise-size);
+  pointer-events: none;
+}
+
+.grain-gradient > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Card faces — gradients tuned to each side’s art */
+.grain-gradient--card-front {
+  --grain-gradient-bg: linear-gradient(
+    148deg,
+    #f2f2f0 0%,
+    #e4e4e2 38%,
+    #d6d6d4 100%
+  );
+  --grain-opacity: 0.09;
+  --grain-blend-mode: overlay;
+}
+
+.grain-gradient--card-back {
+  --grain-gradient-bg: linear-gradient(
+    155deg,
+    #c8c8c8 0%,
+    #b4b4b4 42%,
+    #a8a8a8 100%
+  );
+  --grain-opacity: 0.11;
+  --grain-blend-mode: soft-light;
+}
+
+/* Sample — apply anywhere on the site */
+.grain-gradient--sample {
+  --grain-gradient-bg: radial-gradient(
+    circle at 30% 25%,
+    #3a3a3a 0%,
+    #121212 55%,
+    #0a0a0a 100%
+  );
+  --grain-opacity: 0.12;
+  --grain-blend-mode: overlay;
+  min-height: 12rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grain-gradient::after {
+    opacity: calc(var(--grain-opacity) * 0.65);
+  }
+}

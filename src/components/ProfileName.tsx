@@ -26,6 +26,11 @@ export function ProfileName() {
   const [pos, setPos] = useState({ x: 0, y: 0 })
   const nameRef = useRef<HTMLHeadingElement>(null)
 
+  useEffect(() => {
+    const img = new Image()
+    img.src = profilePicture
+  }, [])
+
   const showFloat = !coarse && hovering
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
